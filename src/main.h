@@ -92,15 +92,15 @@ struct s_lorawan_settings
 	// Number of join retries
 	uint8_t join_trials = 5;
 	// TX power 0 .. 10
-	uint8_t tx_power = 0;
+	uint8_t tx_power = TX_POWER_5;
 	// Data rate 0 .. 15 (validity depnends on Region)
-	uint8_t data_rate = 3;
+	uint8_t data_rate = 2;
 	// LoRaWAN class 0: A, 2: C, 1: B is not supported
 	uint8_t lora_class = 0;
 	// Subband channel selection 1 .. 9
 	uint8_t subband_channels = 1;
 	// Flag if node joins automatically after reboot
-	bool auto_join = false;
+	bool auto_join = true;
 	// Data port to send data
 	uint8_t app_port = 2;
 	// Flag to enable confirmed messages

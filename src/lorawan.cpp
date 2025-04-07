@@ -107,16 +107,30 @@ int8_t init_lorawan(bool region_change)
 	lmh_setDevAddr(g_lorawan_settings.node_dev_addr);
 
 	// Setup the LoRaWan init structure
-	lora_param_init.adr_enable = g_lorawan_settings.adr_enabled;
-	lora_param_init.tx_data_rate = g_lorawan_settings.data_rate;
-	lora_param_init.enable_public_network = g_lorawan_settings.public_network;
-	lora_param_init.nb_trials = g_lorawan_settings.join_trials;
-	lora_param_init.tx_power = g_lorawan_settings.tx_power;
-	lora_param_init.duty_cycle = g_lorawan_settings.duty_cycle_enabled;
+	// lora_param_init.adr_enable = g_lorawan_settings.adr_enabled;
+	// lora_param_init.tx_data_rate = g_lorawan_settings.data_rate;
+	// lora_param_init.enable_public_network = g_lorawan_settings.public_network;
+	// lora_param_init.nb_trials = g_lorawan_settings.join_trials;
+	// lora_param_init.tx_power = g_lorawan_settings.tx_power;
+	// lora_param_init.duty_cycle = g_lorawan_settings.duty_cycle_enabled;
+
+	bool doOTAA = true;
+	#define SCHED_MAX_EVENT_DATA_SIZE APP_TIMER_SCHED_EVENT_DATA_SIZE /**< Maximum size of scheduler events. */
+	#define SCHED_QUEUE_SIZE 60										  /**< Maximum number of events in the scheduler queue. */
+	#define LORAWAN_DATERATE DR_1									  /*LoRaMac datarates definition, from DR_0 to DR_5*/
+	#define LORAWAN_TX_POWER TX_POWER_5								  /*LoRaMac tx power definition, from TX_POWER_0 to TX_POWER_15*/
+	#define JOINREQ_NBTRIALS 3										  /**< Number of trials for the join request. */
+	DeviceClass_t gCurrentClass = CLASS_A;						  /* class definition*/
+	lmh_confirm gCurrentConfirm = LMH_CONFIRMED_MSG;			  /* confirm/unconfirm packet definition*/
+	uint8_t gAppPort = LORAWAN_APP_PORT;						  /* data port*/
+
+	/**@brief Structure containing LoRaWan parameters, needed for lmh_init()
+	 */
+	static lmh_param_t lora_param_init = {LORAWAN_ADR_ON, LORAWAN_DATERATE, LORAWAN_PUBLIC_NETWORK, JOINREQ_NBTRIALS, LORAWAN_TX_POWER, LORAWAN_DUTYCYCLE_OFF};
 
 	APP_LOG("LORA", "Initialize LoRaWAN for region %s", region_names[g_lorawan_settings.lora_region]);
 	// Initialize LoRaWan
-	if (lmh_init(&lora_callbacks, lora_param_init, g_lorawan_settings.otaa_enabled, (eDeviceClass)g_lorawan_settings.lora_class, (LoRaMacRegion_t)g_lorawan_settings.lora_region, region_change) != 0)
+	if (lmh_init(&lora_callbacks, lora_param_init, true, CLASS_A, LORAMAC_REGION_US915) != 0)
 	{
 		APP_LOG("LORA", "Failed to initialize LoRaWAN");
 		return -2;
@@ -207,6 +221,26 @@ void lpwan_join_fail_handler(void)
 	AT_PRINTF("+EVT:JOIN_FAILED_RX_TIMEOUT");
 	APP_LOG("LORA", "OTAA joined failed");
 	APP_LOG("LORA", "Check LPWAN credentials and if a gateway is in range");
+	char dev_eui_str[17] = {0};
+	char app_eui_str[17] = {0};
+	char app_key_str[33] = {0};
+	
+	// Convert the arrays to hexadecimal strings
+	for (int i = 0; i < 8; i++)
+	{
+		sprintf(&dev_eui_str[i * 2], "%02X", g_lorawan_settings.node_device_eui[i]);
+		sprintf(&app_eui_str[i * 2], "%02X", g_lorawan_settings.node_app_eui[i]);
+	}
+	for (int i = 0; i < 16; i++)
+	{
+		sprintf(&app_key_str[i * 2], "%02X", g_lorawan_settings.node_app_key[i]);
+	}
+	
+	// Log the formatted strings
+	APP_LOG("LORA", "Device EUI: %s", dev_eui_str);
+	APP_LOG("LORA", "App EUI: %s", app_eui_str);
+	APP_LOG("LORA", "App Key: %s", app_key_str);
+
 	// Restart Join procedure
 	APP_LOG("LORA", "Restart network join request");
 	g_join_result = false;

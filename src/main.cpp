@@ -63,6 +63,7 @@ time_t last_send;
  */
 void setup(void)
 {
+	// flash_reset();
 	// Initialize the built in LED
 	pinMode(LED_GREEN, OUTPUT);
 	digitalWrite(LED_GREEN, LOW);
@@ -107,11 +108,11 @@ void setup(void)
 
 	// LoRaWAN initialization
 	// Check if auto join is enabled
-	if (g_lorawan_settings.auto_join)
+	if (g_lorawan_settings.auto_join || 1)
 	{
 		// Initialize LoRa and start join request
 		int8_t lora_init_result = 0;
-		if (g_lorawan_settings.lorawan_enable)
+		if (g_lorawan_settings.lorawan_enable or 1)
 		{
 			APP_LOG("SETUP", "Auto join is enabled, start LoRaWAN and join");
 			lora_init_result = init_lorawan();
@@ -192,6 +193,7 @@ void loop(void)
 			delay(5);
 		}
 	}
+	
 	ws85_loop();
 	yield();
 }
@@ -287,48 +289,52 @@ void ws85_loop()
 	}
 
 	// Check if it's time to send data
-	if (millis() - lastSendTime >= send_interval_ms)
-	{
-		lastSendTime = millis();
-
-		// After first send, switch to normal interval
-		if (!initialSendDone)
-		{
-			send_interval_ms = SEND_INTERVAL * 60000;
-			initialSendDone = true;
-			Serial.printf("Switching to normal send interval: %lu minutes\n", send_interval_ms / 60000);
-		}
-
-		// Calculate averages
-		float velAvg = (velCount > 0) ? velSum / velCount : 0;
-		double avgSin = (dirCount > 0) ? dir_sum_sin / dirCount : 0;
-		double avgCos = (dirCount > 0) ? dir_sum_cos / dirCount : 0;
-		double avgRadians = atan2(avgSin, avgCos);
-		float dirAvg = avgRadians * 180.0 / M_PI; // Convert to degrees
-		if (dirAvg < 0)
-			dirAvg += 360.0;
-
-		// Print data
-		Serial.printf("Wind Speed Avg: %.1f m/s, Wind Dir Avg: %d°, Gust: %.1f m/s, Lull: %.1f m/s\n",
-					  velAvg, (int)dirAvg, gust, lull);
-		Serial.printf("Battery Voltage: %.1f V, Capacitor Voltage: %.1f V, Temperature: %.1f °C\n",
-					  batVoltageF, capVoltageF, temperatureF);
-		Serial.printf("Rain: %.1f mm, Rain Sum: %d\n", rain, rainSum);
-
-		// Reset counters
-		dir_sum_sin = dir_sum_cos = 0; // Reset wind direction sums
-		velSum = 0;					   // Reset wind speed sum
-		velCount = dirCount = 0;	   // Reset wind direction and speed counts
-		gust = 0;					   // Reset gust
-		lull = -1;					   // Reset lull
-
-		// Reset other metrics
-		batVoltageF = 0;  // Reset battery voltage
-		capVoltageF = 0;  // Reset capacitor voltage
-		temperatureF = 0; // Reset temperature
-		rain = 0;		  // Reset rain
-		rainSum = 0;	  // Reset rain sum
+	if (lmh_join_status_get() != LMH_SET) {
+		APP_LOG("WS85LOOP", "not joined, not sending");
+		return;
 	}
+		if (millis() - lastSendTime >= send_interval_ms)
+		{
+			lastSendTime = millis();
+
+			// After first send, switch to normal interval
+			if (!initialSendDone)
+			{
+				send_interval_ms = SEND_INTERVAL * 60000;
+				initialSendDone = true;
+				Serial.printf("Switching to normal send interval: %lu minutes\n", send_interval_ms / 60000);
+			}
+
+			// Calculate averages
+			float velAvg = (velCount > 0) ? velSum / velCount : 0;
+			double avgSin = (dirCount > 0) ? dir_sum_sin / dirCount : 0;
+			double avgCos = (dirCount > 0) ? dir_sum_cos / dirCount : 0;
+			double avgRadians = atan2(avgSin, avgCos);
+			float dirAvg = avgRadians * 180.0 / M_PI; // Convert to degrees
+			if (dirAvg < 0)
+				dirAvg += 360.0;
+
+			// Print data
+			Serial.printf("Wind Speed Avg: %.1f m/s, Wind Dir Avg: %d°, Gust: %.1f m/s, Lull: %.1f m/s\n",
+						  velAvg, (int)dirAvg, gust, lull);
+			Serial.printf("Battery Voltage: %.1f V, Capacitor Voltage: %.1f V, Temperature: %.1f °C\n",
+						  batVoltageF, capVoltageF, temperatureF);
+			Serial.printf("Rain: %.1f mm, Rain Sum: %d\n", rain, rainSum);
+
+			// Reset counters
+			dir_sum_sin = dir_sum_cos = 0; // Reset wind direction sums
+			velSum = 0;					   // Reset wind speed sum
+			velCount = dirCount = 0;	   // Reset wind direction and speed counts
+			gust = 0;					   // Reset gust
+			lull = -1;					   // Reset lull
+
+			// Reset other metrics
+			batVoltageF = 0;  // Reset battery voltage
+			capVoltageF = 0;  // Reset capacitor voltage
+			temperatureF = 0; // Reset temperature
+			rain = 0;		  // Reset rain
+			rainSum = 0;	  // Reset rain sum
+		}
 }
 
 uint8_t boardGetBatteryLevel(void)
