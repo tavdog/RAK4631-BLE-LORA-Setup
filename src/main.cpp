@@ -9,12 +9,45 @@
  *
  */
 #include "main.h"
+// Function declarations for WS85 setup and loop
+void ws85_setup();
+void ws85_loop();
+
+// Variables for WS85-related data
+static double dir_sum_sin = 0;
+static double dir_sum_cos = 0;
+static float velSum = 0;
+static float gust = 0;
+static float lull = -1;
+static int velCount = 0;
+static int dirCount = 0;
+
+static float batVoltageF = 0;
+static float capVoltageF = 0;
+static float temperatureF = 0;
+static float rain = 0;
+static int rainSum = 0;
+static bool initialSendDone = false;
+
+// Define constants
+//   _____ _   _ _______ ______ _______      __     _
+//  |_   _| \ | |__   __|  ____|  __ \ \    / /\   | |
+//    | | |  \| |  | |  | |__  | |__) \ \  / /  \  | |
+//    | | | . ` |  | |  |  __| |  _  / \ \/ / /\ \ | |
+//   _| |_| |\  |  | |  | |____| | \ \  \  / ____ \| |____
+//  |_____|_| \_|  |_|  |______|_|  \_\  \/_/    \_\______|
+
+#define SEND_INTERVAL 1 // minutes
+
+// Timer for sending data
+unsigned long lastSendTime = 0;
+unsigned long send_interval_ms = SEND_INTERVAL * 60000;
 
 /** Flag for the event type */
 volatile uint16_t g_task_event_type = NO_EVENT;
 
 /** Set the device name, max length is 10 characters */
-char g_ble_dev_name[10] = "RAK-TEST";
+char g_ble_dev_name[10] = "WS8X";
 
 /** Set firmware version */
 uint16_t g_sw_ver_1 = 1; // major version increase on API change / not backwards compatible
@@ -114,6 +147,8 @@ void setup(void)
 
 	// Set time for sending a packet
 	last_send = millis();
+
+	ws85_setup();
 }
 
 /**
@@ -157,53 +192,172 @@ void loop(void)
 			delay(5);
 		}
 	}
+	ws85_loop();
+	yield();
+}
 
-	// Time to send a packet?
-	if (g_lorawan_settings.send_repeat_time != 0)
+// Function to set up the WS85 serial communication
+void ws85_setup()
+{
+	Serial1.begin(115200); // Initialize Serial1 for WS85 communication
+	Serial.println("WS85 setup complete.");
+}
+
+// Function to handle WS85-related logic in the loop
+void ws85_loop()
+{
+	const int maxIterations = 100; // Maximum number of lines to read per loop
+	int iterationCount = 0;
+
+	// Check if data is available on the serial port
+	while (Serial1.available() > 0 && iterationCount < maxIterations)
 	{
-		if ((millis() - last_send) > g_lorawan_settings.send_repeat_time)
+		iterationCount++;
+		String line = Serial1.readStringUntil('\n');
+		line.trim();
+#ifdef PRINT_WX_SERIAL
+		Serial.println(line);
+#else
+		// Serial.print('.');
+#endif
+		if (line.length() > 0)
 		{
-			g_task_event_type &= N_STATUS;
-
-			last_send = millis();
-			// Send example data
-			// Prepare payload
-			uint8_t payload[4] = {0x01, 0x74, 0x01, 0x9f};
-
-			if (g_lorawan_settings.lorawan_enable)
+			// Find the '=' character
+			int index = line.indexOf('=');
+			if (index != -1)
 			{
-				// LoRaWAN
-				if (g_lpwan_has_joined)
+				// Split into key and value, removing whitespace
+				String key = line.substring(0, index);
+				String value = line.substring(index + 1);
+				key.trim();
+				value.trim();
+
+				// Remove 'V' suffix from voltage readings if present
+				if (value.endsWith("V"))
 				{
-					// Device has joined
-					lmh_error_status result = send_lora_packet(payload, 4, 2);
-					switch (result)
-					{
-					case LMH_SUCCESS:
-						APP_LOG("APP", "Packet enqueued");
-						digitalWrite(LED_GREEN, HIGH);
-						break;
-					case LMH_BUSY:
-						APP_LOG("APP", "LoRa transceiver is busy");
-						break;
-					case LMH_ERROR:
-						APP_LOG("APP", "Packet error, too big to send with current DR");
-						break;
+					value = value.substring(0, value.length() - 1);
+				}
+
+				// Parse based on the key
+				if (key == "WindDir")
+				{
+					float windDir = value.toFloat();
+					double radians = windDir * M_PI / 180.0;
+					dir_sum_sin += sin(radians);
+					dir_sum_cos += cos(radians);
+					dirCount++;
+				}
+				else if (key == "WindSpeed")
+				{
+					float windSpeed = value.toFloat();
+					velSum += windSpeed;
+					velCount++;
+					if (lull == -1 || windSpeed < lull)
+						lull = windSpeed;
+				}
+				else if (key == "WindGust")
+				{
+					float windGust = value.toFloat();
+					if (windGust > gust)
+						gust = windGust;
+				}
+				else if (key == "BatVoltage")
+				{
+					batVoltageF = value.toFloat();
+				}
+				else if (key == "CapVoltage")
+				{
+					capVoltageF = value.toFloat();
+				}
+				else if (key == "GXTS04Temp" || key == "Temperature")
+				{ // Handle both sensor types
+					if (value != "--")
+					{ // Check for valid temperature
+						temperatureF = value.toFloat();
 					}
 				}
-				else
-				{
-					APP_LOG("APP", "Network not joined, skip sending");
-				}
-			}
-			else
-			{
-				if (!send_p2p_packet(payload, 4)) 
-				{
-					APP_LOG("APP", "P2P send failed, check packet size");
-				}
+				// Add more parsing logic here if needed
 			}
 		}
 	}
-	yield();
+
+	if (iterationCount >= maxIterations)
+	{
+		Serial.println("Maximum serial reading iterations reached");
+	}
+
+	// Check if it's time to send data
+	if (millis() - lastSendTime >= send_interval_ms)
+	{
+		lastSendTime = millis();
+
+		// After first send, switch to normal interval
+		if (!initialSendDone)
+		{
+			send_interval_ms = SEND_INTERVAL * 60000;
+			initialSendDone = true;
+			Serial.printf("Switching to normal send interval: %lu minutes\n", send_interval_ms / 60000);
+		}
+
+		// Calculate averages
+		float velAvg = (velCount > 0) ? velSum / velCount : 0;
+		double avgSin = (dirCount > 0) ? dir_sum_sin / dirCount : 0;
+		double avgCos = (dirCount > 0) ? dir_sum_cos / dirCount : 0;
+		double avgRadians = atan2(avgSin, avgCos);
+		float dirAvg = avgRadians * 180.0 / M_PI; // Convert to degrees
+		if (dirAvg < 0)
+			dirAvg += 360.0;
+
+		// Print data
+		Serial.printf("Wind Speed Avg: %.1f m/s, Wind Dir Avg: %d°, Gust: %.1f m/s, Lull: %.1f m/s\n",
+					  velAvg, (int)dirAvg, gust, lull);
+		Serial.printf("Battery Voltage: %.1f V, Capacitor Voltage: %.1f V, Temperature: %.1f °C\n",
+					  batVoltageF, capVoltageF, temperatureF);
+		Serial.printf("Rain: %.1f mm, Rain Sum: %d\n", rain, rainSum);
+
+		// Reset counters
+		dir_sum_sin = dir_sum_cos = 0; // Reset wind direction sums
+		velSum = 0;					   // Reset wind speed sum
+		velCount = dirCount = 0;	   // Reset wind direction and speed counts
+		gust = 0;					   // Reset gust
+		lull = -1;					   // Reset lull
+
+		// Reset other metrics
+		batVoltageF = 0;  // Reset battery voltage
+		capVoltageF = 0;  // Reset capacitor voltage
+		temperatureF = 0; // Reset temperature
+		rain = 0;		  // Reset rain
+		rainSum = 0;	  // Reset rain sum
+	}
+}
+
+uint8_t boardGetBatteryLevel(void)
+{
+	float voltage = (analogRead(BATTERY_PIN) * REAL_VBAT_MV_PER_LSB) / 1000.0; // Convert to volts
+
+	// Define voltage range for battery level
+	const float MAX_VOLTAGE = 4.2; // Maximum LiPo voltage
+	const float MIN_VOLTAGE = 3.0; // Minimum LiPo voltage
+
+	if (voltage > MAX_VOLTAGE)
+	{
+		return 254; // Max level (254 as per LoRaWAN spec)
+	}
+	else if (voltage < MIN_VOLTAGE)
+	{
+		return 1; // Min level (1 as per LoRaWAN spec)
+	}
+
+	// Calculate percentage (1-254 range)
+	uint8_t level = 1 + ((voltage - MIN_VOLTAGE) / (MAX_VOLTAGE - MIN_VOLTAGE)) * 253;
+	return level;
+	// float raw;
+
+	// // Get the raw 12-bit, 0..3000mV ADC value
+	// raw = analogRead(BATTERY_PIN);
+
+	// // Convert the raw value to compensated mv, taking the resistor-
+	// // divider into account (providing the actual LIPO voltage)
+	// // ADC range is 0..3000mV and resolution is 12-bit (0..4095)
+	// return (uint8_t)(raw * REAL_VBAT_MV_PER_LSB *2.55);
 }

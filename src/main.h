@@ -11,6 +11,7 @@
 #include <Arduino.h>
 #include <nrf_nvic.h>
 #include <LoRaWan-Arduino.h>
+#include "keys.h"
 
 // Debug output set to 0 to disable app debug output
 #ifndef APP_DEBUG
@@ -67,11 +68,11 @@ struct s_lorawan_settings
 	uint8_t valid_mark_1 = 0xAA;				// Just a marker for the Flash
 	uint8_t valid_mark_2 = LORAWAN_DATA_MARKER; // Just a marker for the Flash
 												// OTAA Device EUI MSB
-	uint8_t node_device_eui[8] = {0xAC, 0x1F, 0x09, 0xFF, 0xFE, 0x00, 0x00, 0x00};
+	uint8_t node_device_eui[8] = NODE_DEVICE_EUI;
 	// OTAA Application EUI MSB
-	uint8_t node_app_eui[8] = {0xAC, 0x1F, 0x09, 0xFF, 0xFE, 0x00, 0x00, 0x00};
+	uint8_t node_app_eui[8] = NODE_APP_EUI;
 	// OTAA Application Key MSB
-	uint8_t node_app_key[16] = {0x2B, 0x84, 0xE0, 0xB0, 0x9B, 0x68, 0xE5, 0xCB, 0x42, 0x17, 0x6F, 0xE7, 0x53, 0xDC, 0xEE, 0x79};
+	uint8_t node_app_key[16] = NODE_APP_KEY;
 	// ABP Device Address MSB
 	uint32_t node_dev_addr = 0x26021FB4;
 	// ABP Network Session Key MSB
@@ -160,6 +161,17 @@ void init_batt(void);
 float read_batt(void);
 uint8_t get_lora_batt(void);
 uint8_t mv_to_percent(float mvolts);
+
+// The battery sense is hooked to pin A0 (5)
+#define BATTERY_PIN A0
+/** Definition of milliVolt per LSB => 3.0V ADC range and 12-bit ADC resolution = 3000mV/4096 */
+#define VBAT_MV_PER_LSB (0.73242188F)
+/** Voltage divider value => 1.5M + 1M voltage divider on VBAT = (1.5M / (1M + 1.5M)) */
+#define VBAT_DIVIDER (0.4F)
+/** Compensation factor for the VBAT divider */
+#define VBAT_DIVIDER_COMP (1.73)
+/** Fixed calculation of milliVolt from compensation value */
+#define REAL_VBAT_MV_PER_LSB (VBAT_DIVIDER_COMP * VBAT_MV_PER_LSB)
 
 // AT command parser
 typedef struct atcmd_s
