@@ -177,11 +177,11 @@ int8_t init_lorawan(bool region_change)
 		break;
 	}
 
-	if (!lmh_setSubBandChannels(g_lorawan_settings.subband_channels))
-	{
-		APP_LOG("LORA", "lmh_setSubBandChannels failed. Wrong sub band requested?");
-		return -3;
-	}
+	// if (!lmh_setSubBandChannels(g_lorawan_settings.subband_channels))
+	// {
+	// 	APP_LOG("LORA", "lmh_setSubBandChannels failed. Wrong sub band requested?");
+	// 	return -3;
+	// }
 
 	/// \todo Join should be only started if g_lorawan_settings.auto_join is true.
 	if (g_lorawan_settings.auto_join)
