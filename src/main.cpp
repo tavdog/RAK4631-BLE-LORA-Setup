@@ -29,7 +29,7 @@ static float rain = 0;
 static int rainSum = 0;
 static bool initialSendDone = false;
 
-// Define constants
+// Main Interval
 //   _____ _   _ _______ ______ _______      __     _
 //  |_   _| \ | |__   __|  ____|  __ \ \    / /\   | |
 //    | | |  \| |  | |  | |__  | |__) \ \  / /  \  | |
@@ -112,7 +112,7 @@ void setup(void)
 	{
 		// Initialize LoRa and start join request
 		int8_t lora_init_result = 0;
-		if (g_lorawan_settings.lorawan_enable or 1)
+		if (g_lorawan_settings.lorawan_enable)
 		{
 			APP_LOG("SETUP", "Auto join is enabled, start LoRaWAN and join");
 			lora_init_result = init_lorawan();
