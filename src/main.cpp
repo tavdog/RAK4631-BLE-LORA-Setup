@@ -9,25 +9,14 @@
  *
  */
 #include "main.h"
-// Function declarations for WS85 setup and loop
-void ws85_setup();
-void ws85_loop();
+#include "ws8x.h"
 
-// Variables for WS85-related data
-static double dir_sum_sin = 0;
-static double dir_sum_cos = 0;
-static float velSum = 0;
-static float gust = 0;
-static float lull = -1;
-static int velCount = 0;
-static int dirCount = 0;
+#define LORAWAN_APP_DATA_BUFF_SIZE 64
+static uint8_t m_lora_app_data_buffer[LORAWAN_APP_DATA_BUFF_SIZE];
+static lmh_app_data_t m_lora_app_data = {m_lora_app_data_buffer, 0, 0, 0, 0};
 
-static float batVoltageF = 0;
-static float capVoltageF = 0;
-static float temperatureF = 0;
-static float rain = 0;
-static int rainSum = 0;
 static bool initialSendDone = false;
+static int send_error_count = 0;
 
 // Main Interval
 //   _____ _   _ _______ ______ _______      __     _
@@ -148,8 +137,14 @@ void setup(void)
 
 	// Set time for sending a packet
 	last_send = millis();
+	if (g_lorawan_settings.send_repeat_time == 0) {
+		APP_LOG("SETUP", "setting interval to default:  %d sec", send_interval_ms/1000);
+		g_lorawan_settings.send_repeat_time = send_interval_ms;
+	} else {
+		APP_LOG("SETUP", "interval set to:  %d sec", g_lorawan_settings.send_repeat_time/1000 );
+		}
 
-	ws85_setup();
+		ws8x_init();
 }
 
 /**
@@ -193,148 +188,76 @@ void loop(void)
 			delay(5);
 		}
 	}
-	
-	ws85_loop();
-	yield();
-}
 
-// Function to set up the WS85 serial communication
-void ws85_setup()
-{
-	Serial1.begin(115200); // Initialize Serial1 for WS85 communication
-	Serial.println("WS85 setup complete.");
-}
-
-// Function to handle WS85-related logic in the loop
-void ws85_loop()
-{
-	const int maxIterations = 100; // Maximum number of lines to read per loop
-	int iterationCount = 0;
-
-	// Check if data is available on the serial port
-	while (Serial1.available() > 0 && iterationCount < maxIterations)
+	ws8x_checkSerial();
+	// if time to send.  if initialsend yet to happen use interim interval of 60 seconds.
+	if (millis() - lastSendTime >= g_lorawan_settings.send_repeat_time || (!initialSendDone && millis() - lastSendTime >= 60000 ))
 	{
-		iterationCount++;
-		String line = Serial1.readStringUntil('\n');
-		line.trim();
-#ifdef PRINT_WX_SERIAL
-		Serial.println(line);
-#else
-		// Serial.print('.');
-#endif
-		if (line.length() > 0)
+		if (lmh_join_status_get() == LMH_SET)
 		{
-			// Find the '=' character
-			int index = line.indexOf('=');
-			if (index != -1)
-			{
-				// Split into key and value, removing whitespace
-				String key = line.substring(0, index);
-				String value = line.substring(index + 1);
-				key.trim();
-				value.trim();
 
-				// Remove 'V' suffix from voltage readings if present
-				if (value.endsWith("V"))
-				{
-					value = value.substring(0, value.length() - 1);
-				}
-
-				// Parse based on the key
-				if (key == "WindDir")
-				{
-					float windDir = value.toFloat();
-					double radians = windDir * M_PI / 180.0;
-					dir_sum_sin += sin(radians);
-					dir_sum_cos += cos(radians);
-					dirCount++;
-				}
-				else if (key == "WindSpeed")
-				{
-					float windSpeed = value.toFloat();
-					velSum += windSpeed;
-					velCount++;
-					if (lull == -1 || windSpeed < lull)
-						lull = windSpeed;
-				}
-				else if (key == "WindGust")
-				{
-					float windGust = value.toFloat();
-					if (windGust > gust)
-						gust = windGust;
-				}
-				else if (key == "BatVoltage")
-				{
-					batVoltageF = value.toFloat();
-				}
-				else if (key == "CapVoltage")
-				{
-					capVoltageF = value.toFloat();
-				}
-				else if (key == "GXTS04Temp" || key == "Temperature")
-				{ // Handle both sensor types
-					if (value != "--")
-					{ // Check for valid temperature
-						temperatureF = value.toFloat();
-					}
-				}
-				// Add more parsing logic here if needed
-			}
-		}
-	}
-
-	if (iterationCount >= maxIterations)
-	{
-		Serial.println("Maximum serial reading iterations reached");
-	}
-
-	// Check if it's time to send data
-	if (lmh_join_status_get() != LMH_SET) {
-		APP_LOG("WS85LOOP", "not joined, not sending");
-		return;
-	}
-		if (millis() - lastSendTime >= send_interval_ms)
-		{
 			lastSendTime = millis();
 
 			// After first send, switch to normal interval
 			if (!initialSendDone)
 			{
-				send_interval_ms = SEND_INTERVAL * 60000;
 				initialSendDone = true;
-				Serial.printf("Switching to normal send interval: %lu minutes\n", send_interval_ms / 60000);
+				Serial.printf("Switching to normal send interval: %lu minutes\n", g_lorawan_settings.send_repeat_time / 60000);
 			}
 
-			// Calculate averages
-			float velAvg = (velCount > 0) ? velSum / velCount : 0;
-			double avgSin = (dirCount > 0) ? dir_sum_sin / dirCount : 0;
-			double avgCos = (dirCount > 0) ? dir_sum_cos / dirCount : 0;
-			double avgRadians = atan2(avgSin, avgCos);
-			float dirAvg = avgRadians * 180.0 / M_PI; // Convert to degrees
-			if (dirAvg < 0)
-				dirAvg += 360.0;
+			ws8x_populate_lora_buffer(&m_lora_app_data, LORAWAN_APP_DATA_BUFF_SIZE);
 
-			// Print data
-			Serial.printf("Wind Speed Avg: %.1f m/s, Wind Dir Avg: %d°, Gust: %.1f m/s, Lull: %.1f m/s\n",
-						  velAvg, (int)dirAvg, gust, lull);
-			Serial.printf("Battery Voltage: %.1f V, Capacitor Voltage: %.1f V, Temperature: %.1f °C\n",
-						  batVoltageF, capVoltageF, temperatureF);
-			Serial.printf("Rain: %.1f mm, Rain Sum: %d\n", rain, rainSum);
+			m_lora_app_data.port = LORAWAN_APP_PORT;
+			lmh_error_status error;
+			int retryCount = 0;
+			const int maxRetries = 5;
+			do
+			{
+				error = lmh_send(&m_lora_app_data, LMH_UNCONFIRMED_MSG);
+				if (error == LMH_SUCCESS)
+				{
+					Serial.println("LoRa data sent successfully.");
+					send_error_count = 0;  // reset the error_count on success.
+					ws8x_reset_counters(); // reset the averaging counters.
+					break;				   // Exit the loop if the send is successful
+				}
+				else
+				{
+					retryCount++;
+					Serial.printf("lmh_send failed with error code: %d\n", error);
+					Serial.printf("LoRa data send failed. Attempt %d of %d\n", retryCount, maxRetries);
+					delay(1000); // Optional: Add a delay between retries
+				}
+			} while (retryCount < maxRetries);
 
-			// Reset counters
-			dir_sum_sin = dir_sum_cos = 0; // Reset wind direction sums
-			velSum = 0;					   // Reset wind speed sum
-			velCount = dirCount = 0;	   // Reset wind direction and speed counts
-			gust = 0;					   // Reset gust
-			lull = -1;					   // Reset lull
-
-			// Reset other metrics
-			batVoltageF = 0;  // Reset battery voltage
-			capVoltageF = 0;  // Reset capacitor voltage
-			temperatureF = 0; // Reset temperature
-			rain = 0;		  // Reset rain
-			rainSum = 0;	  // Reset rain sum
+			if (retryCount == maxRetries)
+			{
+				Serial.println("LoRa data send failed after maximum retries.");
+				send_error_count++; // reset the error_count on success.
+				if (send_error_count > 5)
+				{
+					// reboot.
+					Serial.println("5 Cycles of send error, Rebooting");
+					NVIC_SystemReset(); // Perform a system reset
+				}
+			}
 		}
+		else
+		{
+			Serial.println("Not joined to the network. Cannot send data.");
+			delay(1000);
+			send_error_count++;
+			Serial.printf("send_error_count : %d", send_error_count);
+			if (send_error_count > 5)
+			{
+				// reboot.
+				Serial.println("No Connection, Rebooting");
+				NVIC_SystemReset(); // Perform a system reset
+			}
+		}
+	}
+
+	yield();
 }
 
 uint8_t boardGetBatteryLevel(void)
