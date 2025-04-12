@@ -1814,7 +1814,7 @@ static int at_exec_dfu(void)
 static int at_query_sendint(void)
 {
 	// Return time in seconds, but it is saved in milli seconds
-	snprintf(g_at_query_buf, ATQUERY_SIZE, "%d", (g_lorawan_settings.send_repeat_time == 0) ? 0 : (int)(g_lorawan_settings.send_repeat_time / 1000));
+	snprintf(g_at_query_buf, ATQUERY_SIZE, "%d", (g_lorawan_settings.send_repeat_time == 0) ? 0 : (int)(g_lorawan_settings.send_repeat_time / 60000)); // ms to min
 
 	return AT_SUCCESS;
 }
@@ -1834,7 +1834,7 @@ static int at_exec_sendint(char *str)
 		return AT_ERRNO_PARA_VAL;
 	}
 
-	g_lorawan_settings.send_repeat_time = time * 1000;
+	g_lorawan_settings.send_repeat_time = time * 60000;  // minutes to ms
 	save_settings();
 
 	return AT_SUCCESS;

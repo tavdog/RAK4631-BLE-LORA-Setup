@@ -198,7 +198,7 @@ void loop(void)
 
 			lastSendTime = millis();
 
-			// After first send, switch to normal interval
+			// After first send, switch to normal interval AT+SENDINT=
 			if (!initialSendDone)
 			{
 				initialSendDone = true;

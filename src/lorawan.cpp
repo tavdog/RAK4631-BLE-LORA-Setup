@@ -283,14 +283,24 @@ static void lpwan_rx_handler(lmh_app_data_t *app_data)
 	memcpy(g_rx_lora_data, app_data->buffer, app_data->buffsize);
 	g_rx_data_len = app_data->buffsize;
 
-	char log_buff[g_rx_data_len * 2] = {0};
-	uint8_t log_idx = 0;
-	for (int idx = 0; idx < g_rx_data_len; idx++)
+	AT_PRINTF("+EVT:RX_1:%d:%d:UNICAST:%d:%s", g_last_rssi, g_last_snr, g_last_fport, app_data->buffer);
+	
+	if (app_data->buffsize > 0 && isdigit(app_data->buffer[0]))
 	{
-		sprintf(&log_buff[log_idx], "%02X", g_rx_lora_data[idx]);
-		log_idx += 3;
+		int new_interval = atoi((const char *)app_data->buffer); // Convert buffer to integer
+		if (new_interval > 0)
+		{
+			Serial.printf("Setting send interval to %d minutes\n", new_interval);
+			g_lorawan_settings.send_repeat_time = new_interval * 60000; // Convert minutes to milliseconds
+			save_settings();
+		}
 	}
-	AT_PRINTF("+EVT:RX_1:%d:%d:UNICAST:%d:%s", g_last_rssi, g_last_snr, g_last_fport, log_buff);
+	// Check if the buffer contains the "reboot" command
+	else if (String("reboot").equals(String((const char *)app_data->buffer)))
+	{
+		Serial.println("Got reboot command");
+		NVIC_SystemReset(); // Perform a system reset
+	}
 }
 
 /**
